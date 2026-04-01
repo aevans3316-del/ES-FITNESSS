@@ -1,101 +1,140 @@
-import React, { useState } from "react";
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
 import "./index.css";
 import Dashboard from "./pages/Dashboard";
 import ClientDetail from "./pages/ClientDetail";
 import AddClient from "./pages/AddClient";
-import CheckIn from "./pages/CheckIn";
+import ClientHome from "./pages/ClientHome";
+import AuthPage from "./pages/AuthPage";
+import Pending from "./pages/Pending";
+import { getSession, onAuthChange, isCoach, signOut, getMyClient } from "./supabase";
 
-const COACH_PIN = "1234"; // Change this to your own PIN
-
-function PinLock({ onUnlock }) {
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState(false);
-
-  function tryPin() {
-    if (pin === COACH_PIN) { onUnlock(); }
-    else { setError(true); setPin(""); setTimeout(() => setError(false), 1500); }
-  }
-
-  return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#080808"}}>
-      <div style={{textAlign:"center"}}>
-        <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:32,letterSpacing:4,color:"#C8FF00",marginBottom:4}}>ESFITNESS</div>
-        <div style={{fontSize:10,color:"#444",letterSpacing:2,textTransform:"uppercase",marginBottom:32}}>Coach Access</div>
-        <input
-          type="password" value={pin} onChange={e => setPin(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && tryPin()}
-          placeholder="Enter PIN"
-          style={{background:"#0f0f0f",border:`1px solid ${error?"#ff5050":"#1e1e1e"}`,color:"#E8E8E8",fontFamily:"'IBM Plex Mono',monospace",fontSize:18,padding:"12px 20px",outline:"none",textAlign:"center",letterSpacing:4,width:180,display:"block",margin:"0 auto"}}
-        />
-        {error && <div style={{color:"#ff5050",fontSize:10,marginTop:8,letterSpacing:1}}>Wrong PIN</div>}
-        <button onClick={tryPin}
-          style={{marginTop:16,background:"#C8FF00",color:"#080808",border:"none",fontFamily:"'Bebas Neue',sans-serif",fontSize:16,letterSpacing:3,padding:"10px 32px",cursor:"pointer",width:180}}>
-          ENTER
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Layout({ children, isCoachUnlocked, onUnlockCoach }) {
+function Header({ session, clientRecord }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const isClientRoute = location.pathname.startsWith("/checkin");
+  const coach = isCoach(session);
 
   return (
-    <div className="app">
-      <header className="hdr">
-        <div className="logo" onClick={() => navigate(isClientRoute ? "/checkin" : "/")} style={{cursor:"pointer"}}>
-          ES<em>FITNESS</em>
-        </div>
-        <div className="hdr-right">
-          {!isClientRoute && (
-            <nav className="nav">
-              <button className={`nbtn${location.pathname === "/" ? " on" : ""}`} onClick={() => navigate("/")}>Dashboard</button>
-              <button className={`nbtn${location.pathname === "/add" ? " on" : ""}`} onClick={() => navigate("/add")}>+ Client</button>
-            </nav>
-          )}
-          <div className="mode-toggle">
-            <button className={!isClientRoute ? "on" : ""} onClick={() => { if(!isCoachUnlocked) onUnlockCoach(); else navigate("/"); }}>Coach</button>
-            <button className={isClientRoute ? "on" : ""} onClick={() => navigate("/checkin")}>Client</button>
-          </div>
-        </div>
-      </header>
-      {children}
-    </div>
+    <header className="hdr">
+      <div className="logo" onClick={() => navigate(coach ? "/" : "/checkin")} style={{ cursor: "pointer" }}>
+        ES<em>FITNESS</em>
+      </div>
+      <div className="hdr-right">
+        {coach && (
+          <nav className="nav">
+            <button className={`nbtn${location.pathname === "/" ? " on" : ""}`} onClick={() => navigate("/")}>Dashboard</button>
+            <button className={`nbtn${location.pathname === "/add" ? " on" : ""}`} onClick={() => navigate("/add")}>+ Client</button>
+            <button className={`nbtn${location.pathname === "/pending" ? " on" : ""}`} onClick={() => navigate("/pending")}>Approvals</button>
+          </nav>
+        )}
+        {session && (
+          <button className="nbtn" onClick={signOut}>Sign Out</button>
+        )}
+      </div>
+    </header>
   );
 }
 
 export default function App() {
-  const [coachUnlocked, setCoachUnlocked] = useState(false);
-  const [showPin, setShowPin] = useState(false);
+  const [session, setSession] = useState(null);
+  const [clientRecord, setClientRecord] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getSession().then(async (s) => {
+      setSession(s);
+      if (s && !isCoach(s)) {
+        const c = await getMyClient(s.user.id);
+        setClientRecord(c);
+      }
+      setLoading(false);
+    });
+    const { data: { subscription } } = onAuthChange(async (s) => {
+      setSession(s);
+      if (s && !isCoach(s)) {
+        const c = await getMyClient(s.user.id);
+        setClientRecord(c);
+      } else {
+        setClientRecord(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) return <div className="loading">LOADING...</div>;
+
+  const coach = isCoach(session);
 
   return (
     <BrowserRouter>
-      {showPin && !coachUnlocked && (
-        <div style={{position:"fixed",inset:0,zIndex:999,background:"#080808"}}>
-          <PinLock onUnlock={() => { setCoachUnlocked(true); setShowPin(false); }} />
-        </div>
-      )}
-      <Routes>
-        <Route path="/" element={
-          coachUnlocked
-            ? <Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><Dashboard /></Layout>
-            : <Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><PinLock onUnlock={() => setCoachUnlocked(true)} /></Layout>
-        } />
-        <Route path="/client/:id" element={
-          coachUnlocked
-            ? <Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><ClientDetail /></Layout>
-            : <Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><PinLock onUnlock={() => setCoachUnlocked(true)} /></Layout>
-        } />
-        <Route path="/add" element={
-          coachUnlocked
-            ? <Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><AddClient /></Layout>
-            : <Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><PinLock onUnlock={() => setCoachUnlocked(true)} /></Layout>
-        } />
-        <Route path="/checkin" element={<Layout isCoachUnlocked={coachUnlocked} onUnlockCoach={() => setShowPin(true)}><CheckIn /></Layout>} />
-      </Routes>
+      <div className="app">
+        {session && <Header session={session} clientRecord={clientRecord} />}
+        <Routes>
+          {/* Not logged in → auth page */}
+          {!session && <Route path="*" element={<AuthPage />} />}
+
+          {/* Coach routes */}
+          {coach && <Route path="/" element={<Dashboard />} />}
+          {coach && <Route path="/client/:id" element={<ClientDetail />} />}
+          {coach && <Route path="/add" element={<AddClient />} />}
+          {coach && <Route path="/pending" element={<PendingApprovals />} />}
+          {coach && <Route path="*" element={<Navigate to="/" />} />}
+
+          {/* Client: approved */}
+          {!coach && session && clientRecord?.status === "approved" && (
+            <Route path="*" element={<ClientHome client={clientRecord} session={session} />} />
+          )}
+
+          {/* Client: pending approval */}
+          {!coach && session && (!clientRecord || clientRecord?.status === "pending") && (
+            <Route path="*" element={<Pending />} />
+          )}
+        </Routes>
+      </div>
     </BrowserRouter>
+  );
+}
+
+function PendingApprovals() {
+  const [pending, setPending] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { getPendingSignups, approveSignup, denySignup } = require("./supabase");
+
+  useEffect(() => {
+    getPendingSignups().then(d => { setPending(d || []); setLoading(false); }).catch(console.error);
+  }, []);
+
+  async function approve(p) {
+    await approveSignup(p);
+    setPending(prev => prev.filter(x => x.id !== p.id));
+  }
+
+  async function deny(id) {
+    await denySignup(id);
+    setPending(prev => prev.filter(x => x.id !== id));
+  }
+
+  if (loading) return <div className="loading">LOADING...</div>;
+
+  return (
+    <div className="page-sm">
+      <div className="T1">Pending Approvals</div>
+      <div className="sub">{pending.length} client{pending.length !== 1 ? "s" : ""} waiting</div>
+      <hr className="divider" />
+      {pending.length === 0
+        ? <div className="empty">No pending signups.</div>
+        : pending.map(p => (
+          <div key={p.id} style={{ background: "#0f0f0f", border: "1px solid #1e1e1e", padding: "18px 20px", marginBottom: 10 }}>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 20, letterSpacing: 1 }}>{p.name}</div>
+            <div style={{ fontSize: 10, color: "#555", marginTop: 2 }}>{p.email}</div>
+            <div style={{ fontSize: 10, color: "#555" }}>{p.goal || "No goal set"}</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button className="save-btn" onClick={() => approve(p)}>✓ Approve</button>
+              <button className="ghost-btn" onClick={() => deny(p.id)}>✕ Deny</button>
+            </div>
+          </div>
+        ))
+      }
+    </div>
   );
 }
